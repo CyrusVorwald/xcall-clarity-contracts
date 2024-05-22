@@ -4,7 +4,7 @@ This repository contains an implementation of the xCall protocol in Clarity, a s
 
 ## Deviations from xCall Specification
 
-While this Clarity implementation aims to provide similar functionality to the regular xCall described in the ADR (Architecture Decision Record), there are some key differences due to the characteristics and limitations of the Clarity language.
+While this Clarity implementation aims to provide similar functionality to the [xCall specification](https://github.com/icon-project/xcall-multi/blob/main/docs/adr/xcall.md), there are some key differences due to the characteristics and limitations of the Clarity language.
 
 Clarity does not support dynamic dispatch, meaning that generic contract calls are not possible. In the xCall specification, the `handleCallMessage` function can dynamically call the target contract based on the provided contract address. However, in the Clarity implementation, the contract calls need to be explicitly defined and hardcoded.
 
