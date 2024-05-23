@@ -1,0 +1,15 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "clarinet",
+            "request": "launch",
+            "name": "Call send-message",
+            "manifest": "${workspaceFolder}/Clarinet.toml",
+            "expression": "(contract-call? .call-service send-message \"0xa\" 0xcd8c746573742d6d657373616765 none u1000) (contract-call? .call-service get-message-hash (contract-call? .call-service get-chain-identifier(\"0xa\")) u1)"
+        },
+    ]
+}

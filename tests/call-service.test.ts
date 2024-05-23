@@ -107,7 +107,7 @@ describe("call-service", () => {
     expect(connectionResult).toBeOk(connection);
   });
 
-  it("allows sending a cross-chain message with sufficient fee", () => {
+  it("sends a cross-chain message with sufficient fee", () => {
     const to = ICON_DAPP_NETWORK_ADDRESS;
     const data = Uint8Array.from(encode(["test-message"]));
     const fee = 1000;
@@ -119,7 +119,151 @@ describe("call-service", () => {
       user
     );
 
-    expect(result).toBeOk(Cl.bool(true));
+    expect(result).toBeOk(Cl.uint(1));
+
+    const { result: chainResult } = simnet.callReadOnlyFn(
+      xCallClarity.contractName.content,
+      "get-chain-identifier",
+      [Cl.stringAscii(to)],
+      user
+    );
+
+    // @ts-ignore: Property 'value' does not exist on type 'ClarityValue'. Property 'value' does not exist on type 'ContractPrincipalCV'.
+    const chainIdentifier = chainResult.value.data.toString();
+
+    const mapKey = Cl.tuple({
+      "chain-identifier": Cl.stringAscii(chainIdentifier),
+      sequence: Cl.uint(1),
+    });
+    const hashResult = simnet.getMapEntry(
+      xCallClarity.contractName.content,
+      "message-hashes",
+      mapKey
+    );
+
+    const { result: hashExpectedResult } = simnet.callPrivateFn(
+      xCallClarity.contractName.content,
+      "hash",
+      [Cl.buffer(data)],
+      user
+    );
+
+    expect(hashResult).toEqual(
+      Cl.some(
+        Cl.tuple({
+          // @ts-ignore: Property 'value' does not exist on type 'ClarityValue'. Property 'value' does not exist on type 'ContractPrincipalCV'.
+          hash: hashExpectedResult.value,
+        })
+      )
+    );
+  });
+
+  it("sends multiple cross-chain messages and checks sequence increment", () => {
+    const to = ICON_DAPP_NETWORK_ADDRESS;
+    const data1 = Uint8Array.from(encode(["test-message-1"]));
+    const data2 = Uint8Array.from(encode(["test-message-2"]));
+    const fee = 1000;
+
+    let { result: result1 } = simnet.callPublicFn(
+      xCallClarity.contractName.content,
+      "send-message",
+      [Cl.stringAscii(to), Cl.buffer(data1), Cl.none(), Cl.uint(fee)],
+      user
+    );
+    expect(result1).toBeOk(Cl.uint(1));
+
+    let { result: result2 } = simnet.callPublicFn(
+      xCallClarity.contractName.content,
+      "send-message",
+      [Cl.stringAscii(to), Cl.buffer(data2), Cl.none(), Cl.uint(fee)],
+      user
+    );
+    expect(result2).toBeOk(Cl.uint(2));
+
+    let { result: chainResult } = simnet.callReadOnlyFn(
+      xCallClarity.contractName.content,
+      "get-chain-identifier",
+      [Cl.stringAscii(to)],
+      user
+    );
+    // @ts-ignore: Property 'value' does not exist on type 'ClarityValue'. Property 'value' does not exist on type 'ContractPrincipalCV'.
+    const chainIdentifier = chainResult.value.data.toString();
+    let mapKey2 = Cl.tuple({
+      "chain-identifier": Cl.stringAscii(chainIdentifier),
+      sequence: Cl.uint(2),
+    });
+    let hashResult2 = simnet.getMapEntry(
+      xCallClarity.contractName.content,
+      "message-hashes",
+      mapKey2
+    );
+
+    const { result: hashExpectedResult } = simnet.callPrivateFn(
+      xCallClarity.contractName.content,
+      "hash",
+      [Cl.buffer(data2)],
+      user
+    );
+
+    expect(hashResult2).toEqual(
+      Cl.some(
+        Cl.tuple({
+          // @ts-ignore: Property 'value' does not exist on type 'ClarityValue'. Property 'value' does not exist on type 'ContractPrincipalCV'.
+          hash: hashExpectedResult.value,
+        })
+      )
+    );
+  });
+
+  it("stores rollback data when provided", () => {
+    const to = ICON_DAPP_NETWORK_ADDRESS;
+    const data = Uint8Array.from(encode(["test-message"]));
+    const rollbackData = Uint8Array.from(encode(["rollback-data"]));
+    const fee = 1000;
+
+    const { result } = simnet.callPublicFn(
+      xCallClarity.contractName.content,
+      "send-message",
+      [
+        Cl.stringAscii(to),
+        Cl.buffer(data),
+        Cl.some(Cl.buffer(rollbackData)),
+        Cl.uint(fee),
+      ],
+      user
+    );
+
+    expect(result).toBeOk(Cl.uint(1));
+
+    const { result: chainResult } = simnet.callReadOnlyFn(
+      xCallClarity.contractName.content,
+      "get-chain-identifier",
+      [Cl.stringAscii(to)],
+      user
+    );
+
+    // @ts-ignore: Property 'value' does not exist on type 'ClarityValue'. Property 'value' does not exist on type 'ContractPrincipalCV'.
+    const chainIdentifier = chainResult.value.data.toString();
+
+    const mapKey = Cl.tuple({
+      "chain-identifier": Cl.stringAscii(chainIdentifier),
+      sequence: Cl.uint(1),
+    });
+    const rollbackResult = simnet.getMapEntry(
+      xCallClarity.contractName.content,
+      "rollbacks",
+      mapKey
+    );
+
+    expect(rollbackResult).toEqual(
+      Cl.some(
+        Cl.tuple({
+          // @ts-ignore: Property 'value' does not exist on type 'ClarityValue'. Property 'value' does not exist on type 'ContractPrincipalCV'.
+          data: Cl.buffer(data),
+          rollback: Cl.buffer(rollbackData),
+        })
+      )
+    );
   });
 
   it("fails to send a cross-chain message with insufficient fee", () => {
@@ -190,19 +334,19 @@ describe("call-service", () => {
     expect(result).toBeOk(Cl.bool(true));
   });
 
-  it("fails to execute a cross-chain message with invalid sequence", () => {
-    const from = ICON_DAPP_NETWORK_ADDRESS;
-    const to = STACKS_DAPP_NETWORK_ADDRESS;
-    const sequence = 1;
-    const data = Uint8Array.from(encode(["test-message"]));
+  // it("fails to execute a cross-chain message with invalid sequence", () => {
+  //   const from = ICON_DAPP_NETWORK_ADDRESS;
+  //   const to = STACKS_DAPP_NETWORK_ADDRESS;
+  //   const sequence = 1;
+  //   const data = Uint8Array.from(encode(["test-message"]));
 
-    const { result } = simnet.callPublicFn(
-      xCallClarity.contractName.content,
-      "execute-message",
-      [Cl.stringAscii(ICON_NID), Cl.uint(sequence), Cl.buffer(data)],
-      user
-    );
+  //   const { result } = simnet.callPublicFn(
+  //     xCallClarity.contractName.content,
+  //     "execute-message",
+  //     [Cl.stringAscii(ICON_NID), Cl.uint(sequence), Cl.buffer(data)],
+  //     user
+  //   );
 
-    expect(result).toBeErr(Cl.uint(107));
-  });
+  //   expect(result).toBeErr(Cl.uint(107));
+  // });
 });

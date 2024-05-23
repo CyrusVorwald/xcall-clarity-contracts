@@ -15,6 +15,7 @@
 (define-constant ERR_INVALID_SEQUENCE (err u102))
 (define-constant ERR_INSUFFICIENT_FEE (err u103))
 (define-constant ERR_NO_DEFAULT_CONNECTION (err u104))
+(define-constant ERR_MESSAGE_NOT_FOUND (err u105))
 (define-constant MAX_SEQUENCE (- (pow u2 u64) u1))
 (define-constant PROTOCOL_FEE u1000)
 ;;
@@ -28,17 +29,25 @@
 ;; data maps
 (define-map message-sequences { chain-identifier: (string-ascii 50), contract-address: principal } { current-sequence: uint })
 (define-map message-hashes { chain-identifier: (string-ascii 50), sequence: uint } { hash: (buff 32) })
+(define-map rollbacks { chain-identifier: (string-ascii 50), sequence: uint } { data: (buff 1024), rollback: (buff 1024) })
 (define-map default-connections { chain-identifier: (string-ascii 50) } { connection: principal })
 ;;
 
 ;; public functions
-;; Send a cross-chain message
 (define-public (send-message (to (string-ascii 150)) (data (buff 1024)) (rollback (optional (buff 1024))) (fee uint))
-  (let ((chain-identifier (get-chain-identifier to)))
+  (let ((chain-identifier (unwrap-panic (get-chain-identifier to))))
     (asserts! (>= fee (var-get protocol-fee)) ERR_INSUFFICIENT_FEE)
-    ;; TODO: Implement logic to send the message to the destination chain
-    ;; TODO: Emit CallMessageSent event
-    (ok true)
+    (let ((current-sequence (unwrap-panic (get-current-sequence chain-identifier (as-contract tx-sender)))))
+      (let ((sequence (+ current-sequence u1)))
+        (unwrap-panic (increment-sequence chain-identifier (as-contract tx-sender)))
+        (map-set message-hashes { chain-identifier: chain-identifier, sequence: sequence } { hash: (hash160 data) })
+        (if (is-some rollback)
+            (map-set rollbacks { chain-identifier: chain-identifier, sequence: sequence } { data: data, rollback: (unwrap-panic rollback) })
+            true)
+        ;; (emit-event (message-sent { from: (as-contract tx-sender), to: to, sequence: sequence, data: data }))
+        (ok sequence)
+      )
+    )
   )
 )
 
@@ -119,14 +128,21 @@
     (err ERR_NO_DEFAULT_CONNECTION)
   )
 )
-;;
 
-;; private functions
-(define-private (get-chain-identifier (network-address (string-ascii 150)))
+(define-read-only (get-message-hash (chain-identifier (string-ascii 50)) (sequence uint))
+  (match (map-get? message-hashes { chain-identifier: chain-identifier, sequence: sequence })
+    entry (ok (get hash entry))
+    (err ERR_MESSAGE_NOT_FOUND)
+  )
+)
+
+(define-read-only (get-chain-identifier (network-address (string-ascii 150)))
   ;; TODO: Extract the chain ID from the network address
   (ok "chain-identifier")
 )
+;;
 
+;; private functions
 (define-private (get-current-sequence (chain-identifier (string-ascii 50)) (contract-address principal))
   (match (map-get? message-sequences { chain-identifier: chain-identifier, contract-address: contract-address })
     entry (ok (get current-sequence entry))
@@ -145,5 +161,10 @@
 (define-private (address-string-to-principal (address (string-ascii 150)))
   ;; TODO: Implement the address string to principal conversion logic
   (ok tx-sender)
+)
+
+(define-private (hash (data (buff 1024)))
+  ;; used for tests. simnet can only call contracts, not builtin hash160
+  (ok (hash160 data))
 )
 ;;
