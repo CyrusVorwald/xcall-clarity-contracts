@@ -1,3 +1,5 @@
+[![codecov](https://codecov.io/github/CyrusVorwald/xcall-clarity-contracts/graph/badge.svg?token=8G28RT32CM)](https://codecov.io/github/CyrusVorwald/xcall-clarity-contracts)
+
 # xCall Clarity Implementation
 
 This repository contains an implementation of the xCall protocol in Clarity, a smart contract language for the Stacks blockchain. The xCall protocol enables cross-chain communication and interoperability between different blockchain networks.
