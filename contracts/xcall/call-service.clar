@@ -16,8 +16,18 @@
 (define-constant ERR_INSUFFICIENT_FEE (err u103))
 (define-constant ERR_NO_DEFAULT_CONNECTION (err u104))
 (define-constant ERR_MESSAGE_NOT_FOUND (err u105))
+(define-constant ERR_INVALID_MESSAGE_HASH (err u106))
+(define-constant ERR_UNSUPPORTED_FUNCTION (err u107))
+(define-constant ERR_UNKNOWN_MESSAGE_TYPE (err u108))
+(define-constant ERR_TRANSFER_FAILED (err u109))
+(define-constant ERR_UNSUPPORTED_CONTRACT (err u110))
+
 (define-constant MAX_SEQUENCE (- (pow u2 u64) u1))
 (define-constant PROTOCOL_FEE u1000)
+
+(define-constant CALL_MESSAGE_TYPE u1)
+(define-constant CALL_MESSAGE_WITH_ROLLBACK_TYPE u2)
+(define-constant PERSISTENT_MESSAGE_TYPE u3)
 ;;
 
 ;; data vars
@@ -44,7 +54,7 @@
         (if (is-some rollback)
             (map-set rollbacks { chain-identifier: chain-identifier, sequence: sequence } { data: data, rollback: (unwrap-panic rollback) })
             true)
-        (print { from: tx-sender, to: to, sequence: sequence, data: data })
+        (print (merge { event: "send-message" } { from: tx-sender, to: to, sequence: sequence, data: data }))
         (ok sequence)
       )
     )
@@ -53,7 +63,7 @@
 
 (define-public (handle-message (from (string-ascii 150)) (sequence uint) (data (buff 1024)))
   (let ((chain-identifier (unwrap-panic (get-chain-identifier from))))
-    (let ((contract-address (unwrap-panic (contract-call? .util address-string-to-principal (unwrap-panic (as-max-len? from 128))))))
+    (let ((contract-address (unwrap-panic (contract-call? .util address-string-to-principal (unwrap-panic (as-max-len? from u128))))))
       (let ((current-sequence (unwrap-panic (get-current-sequence chain-identifier contract-address))))
         (asserts! (is-eq sequence (+ current-sequence u1)) ERR_INVALID_SEQUENCE)
         (unwrap-panic (increment-sequence chain-identifier contract-address))
@@ -67,13 +77,13 @@
         (let ((decoded-data (contract-call? .rlp-decode rlp-to-list data)))
           (let ((message-type (contract-call? .rlp-decode rlp-decode-uint decoded-data u0)))
             (if (is-eq message-type CALL_MESSAGE_TYPE)
-                (handle-call-message from (contract-call? .rlp-decode rlp-decode-buff decoded-data u1))
+                (handle-call-message from (unwrap-panic (element-at? (contract-call? .rlp-decode rlp-decode-buff decoded-data u1) u0)))
                 (if (is-eq message-type CALL_MESSAGE_WITH_ROLLBACK_TYPE)
-                    (handle-call-message-with-rollback from (contract-call? .rlp-decode rlp-decode-buff decoded-data u1) (rlp-decode-buff decoded-data u2))
+                    (handle-call-message-with-rollback from (unwrap-panic (element-at? (contract-call? .rlp-decode rlp-decode-buff decoded-data u1) u0)) (unwrap-panic (element-at? (contract-call? .rlp-decode rlp-decode-buff decoded-data u2) u0)))
                     (if (is-eq message-type PERSISTENT_MESSAGE_TYPE)
-                        (handle-persistent-message from (contract-call? .rlp-decode rlp-decode-buff decoded-data u1))
+                        (handle-persistent-message from (unwrap-panic (element-at? (contract-call? .rlp-decode rlp-decode-buff decoded-data u1) u0)))
                         (begin
-                          (print "unknown-message-type" { message-type: message-type })
+                          (print (merge { event: "unknown-message-type" } { message-type: message-type }))
                           ERR_UNKNOWN_MESSAGE_TYPE
                         )
                     )
@@ -86,73 +96,86 @@
   )
 )
 
-;; (define-private (handle-call-message (from (string-ascii 150)) (data (buff 1024)))
-;;   (let ((decoded-data (contract-call? .rlp-decode rlp-to-list data)))
-;;     (let ((target-contract (unwrap-panic (contract-call? .util address-string-to-principal (unwrap-panic (as-max-len? (contract-call? .rlp-decode rlp-decode-string decoded-data u0) u128))))))
-;;       (let ((function-name (contract-call? .rlp-decode rlp-decode-string decoded-data u1)))
-;;         (let ((args (contract-call? .rlp-decode rlp-decode-list decoded-data u2)))
-;;           (if (is-eq function-name "execute")
-;;               (let ((amount (contract-call? .rlp-decode rlp-decode-uint args u0)))
-;;                 (let ((token (unwrap-panic (contract-call? .util address-string-to-principal (unwrap-panic (as-max-len? (contract-call? .rlp-decode rlp-decode-string args u1) u128))))))
-;;                   (let ((sender (unwrap-panic (contract-call? .util address-string-to-principal (unwrap-panic (as-max-len? from u128))))))
-;;                     (if (is-eq contract-caller tx-sender)
-;;                         (begin
-;;                           (try! (as-contract (contract-call? token transfer amount tx-sender sender none)))
-;;                           (print "execute-success" { from: from, target-contract: target-contract })
-;;                           (ok true)
-;;                         )
-;;                         (begin
-;;                           (print "unauthorized-caller" { caller: contract-caller })
-;;                           ERR_UNAUTHORIZED
-;;                         )
-;;                     )
-;;                   )
-;;                 )
-;;               )
-;;               (begin
-;;                 (print "unsupported-function" { function-name: function-name })
-;;                 ERR_UNSUPPORTED_FUNCTION
-;;               )
-;;           )
-;;         )
-;;       )
-;;     )
-;;   )
-;; )
+(define-private (handle-call-message (from (string-ascii 150)) (data (buff 1024)))
+  (let ((decoded-data (contract-call? .rlp-decode rlp-to-list data)))
+    (let ((target-contract (contract-call? .rlp-decode rlp-decode-string decoded-data u0)))
+      (let ((function-name (contract-call? .rlp-decode rlp-decode-string decoded-data u1)))
+        (let ((args (contract-call? .rlp-decode rlp-decode-list decoded-data u2)))
+          (if (is-eq target-contract "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.my-contract")
+              (if (is-eq function-name "function1")
+                  (handle-function1 from args)
+                  (if (is-eq function-name "function2")
+                      (handle-function2 from args)
+                      (begin
+                        (print (merge { event: "unsupported-function" } { target-contract: target-contract, function-name: function-name }))
+                        ERR_UNSUPPORTED_FUNCTION
+                      )
+                  )
+              )
+              (begin
+                (print (merge { event: "unsupported-contract" } { target-contract: target-contract }))
+                ERR_UNSUPPORTED_CONTRACT
+              )
+          )
+        )
+      )
+    )
+  )
+)
 
-;; (define-private (handle-call-message (from (string-ascii 150)) (data (buff 1024)))
-;;   (let ((decoded-data (contract-call? .rlp-decode rlp-to-list data)))
-;;     (let ((target-contract (contract-call? .rlp-decode rlp-decode-string decoded-data u0)))
-;;       (let ((function-name (contract-call? .rlp-decode rlp-decode-string decoded-data u1)))
-;;         (let ((args (contract-call? .rlp-decode rlp-decode-list decoded-data u2)))
-;;           (if (and (is-eq target-contract "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.contract-goes-here") (is-eq function-name "transfer"))
-;;               (let ((amount (contract-call? .rlp-decode rlp-decode-uint args u0)))
-;;                 (let ((recipient (unwrap-panic (contract-call? .util address-string-to-principal (unwrap-panic (as-max-len? (contract-call? .rlp-decode rlp-decode-string args u1) 128))))))
-;;                   (let ((sender (unwrap-panic (contract-call? .util address-string-to-principal from))))
-;;                     (if (is-eq contract-caller tx-sender)
-;;                         (begin
-;;                           (try! (as-contract (contract-call? 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.contract-goes-here transfer amount tx-sender recipient none)))
-;;                           (print "transfer-success" { from: from, recipient: recipient, amount: amount })
-;;                           (ok true)
-;;                         )
-;;                         (begin
-;;                           (print "unauthorized-caller" { caller: contract-caller })
-;;                           ERR_UNAUTHORIZED
-;;                         )
-;;                     )
-;;                   )
-;;                 )
-;;               )
-;;               (begin
-;;                 (print "unsupported-function" { target-contract: target-contract, function-name: function-name })
-;;                 ERR_UNSUPPORTED_FUNCTION
-;;               )
-;;           )
-;;         )
-;;       )
-;;     )
-;;   )
-;; )
+(define-private (handle-call-message-with-rollback (from (string-ascii 150)) (data (buff 1024)) (rollback-data (buff 1024)))
+  (let ((decoded-data (contract-call? .rlp-decode rlp-to-list data)))
+    (let ((target-contract (contract-call? .rlp-decode rlp-decode-string decoded-data u0)))
+      (let ((function-name (contract-call? .rlp-decode rlp-decode-string decoded-data u1)))
+        (let ((args (contract-call? .rlp-decode rlp-decode-list decoded-data u2)))
+          (if (is-eq target-contract "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.my-contract")
+              (if (is-eq function-name "function1")
+                  (handle-function1-with-rollback from args rollback-data)
+                  (if (is-eq function-name "function2")
+                      (handle-function2-with-rollback from args rollback-data)
+                      (begin
+                        (print (merge { event: "unsupported-function" } { target-contract: target-contract, function-name: function-name }))
+                        ERR_UNSUPPORTED_FUNCTION
+                      )
+                  )
+              )
+              (begin
+                (print (merge { event: "unsupported-contract" } { target-contract: target-contract }))
+                ERR_UNSUPPORTED_CONTRACT
+              )
+          )
+        )
+      )
+    )
+  )
+)
+
+(define-private (handle-persistent-message (from (string-ascii 150)) (data (buff 1024)))
+  (let ((decoded-data (contract-call? .rlp-decode rlp-to-list data)))
+    (let ((target-contract (contract-call? .rlp-decode rlp-decode-string decoded-data u0)))
+      (let ((function-name (contract-call? .rlp-decode rlp-decode-string decoded-data u1)))
+        (let ((args (contract-call? .rlp-decode rlp-decode-list decoded-data u2)))
+          (if (is-eq target-contract "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.my-contract")
+              (if (is-eq function-name "function3")
+                  (handle-function3 from args)
+                  (if (is-eq function-name "function4")
+                      (handle-function4 from args)
+                      (begin
+                        (print (merge { event: "unsupported-function" } { target-contract: target-contract, function-name: function-name }))
+                        ERR_UNSUPPORTED_FUNCTION
+                      )
+                  )
+              )
+              (begin
+                (print (merge { event: "unsupported-contract" } { target-contract: target-contract }))
+                ERR_UNSUPPORTED_CONTRACT
+              )
+          )
+        )
+      )
+    )
+  )
+)
 
 ;; Execute a cross-chain message
 (define-public (execute-message (chain-identifier (string-ascii 50)) (sequence uint) (data (buff 1024)))
@@ -248,3 +271,52 @@
   (ok (hash160 data))
 )
 ;;
+
+;;;;;;;;; dapp functions
+(define-private (handle-function1 (from (string-ascii 150)) (args (list 500 (buff 1024))))
+  ;; Implement the logic for handling function1
+  ;; Extract the necessary arguments from 'args' using RLP decoding functions
+  ;; Perform the desired operations
+  ;; Return (ok true) on success or (err ERR_FUNCTION1_FAILED) on failure
+  (ok true)
+)
+
+(define-private (handle-function2 (from (string-ascii 150)) (args (list 500 (buff 1024))))
+  ;; Implement the logic for handling function2
+  ;; Extract the necessary arguments from 'args' using RLP decoding functions
+  ;; Perform the desired operations
+  ;; Return (ok true) on success or (err ERR_FUNCTION2_FAILED) on failure
+  (ok true)
+)
+
+(define-private (handle-function3 (from (string-ascii 150)) (args (list 500 (buff 1024))))
+  ;; Implement the logic for handling function3
+  ;; Extract the necessary arguments from 'args' using RLP decoding functions
+  ;; Perform the desired operations
+  ;; Return (ok true) on success or (err ERR_FUNCTION3_FAILED) on failure
+  (ok true)
+)
+
+(define-private (handle-function4 (from (string-ascii 150)) (args (list 500 (buff 1024))))
+  ;; Implement the logic for handling function4
+  ;; Extract the necessary arguments from 'args' using RLP decoding functions
+  ;; Perform the desired operations
+  ;; Return (ok true) on success or (err ERR_FUNCTION4_FAILED) on failure
+  (ok true)
+)
+
+(define-private (handle-function1-with-rollback (from (string-ascii 150)) (args (list 500 (buff 1024))) (rollback-data (buff 1024)))
+  ;; Implement the logic for handling function1 with rollback
+  ;; Extract the necessary arguments from 'args' using RLP decoding functions
+  ;; Perform the desired operations and handle rollbacks if needed
+  ;; Return (ok true) on success or (err ERR_FUNCTION1_FAILED) on failure
+  (ok true)
+)
+
+(define-private (handle-function2-with-rollback (from (string-ascii 150)) (args (list 500 (buff 1024))) (rollback-data (buff 1024)))
+  ;; Implement the logic for handling function2 with rollback
+  ;; Extract the necessary arguments from 'args' using RLP decoding functions
+  ;; Perform the desired operations and handle rollbacks if needed
+  ;; Return (ok true) on success or (err ERR_FUNCTION2_FAILED) on failure
+  (ok true)
+)
