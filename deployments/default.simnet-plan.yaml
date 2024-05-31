@@ -50,6 +50,16 @@ plan:
     - id: 0
       transactions:
         - emulated-contract-publish:
+            contract-name: rlp-decode
+            emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+            path: lib/rlp/rlp-decode.clar
+            clarity-version: 2
+        - emulated-contract-publish:
+            contract-name: util
+            emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+            path: contracts/util.clar
+            clarity-version: 2
+        - emulated-contract-publish:
             contract-name: call-service
             emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
             path: contracts/xcall/call-service.clar
@@ -73,15 +83,5 @@ plan:
             contract-name: fee-manage-trait
             emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
             path: contracts/xcall/fee-manage-trait.clar
-            clarity-version: 2
-        - emulated-contract-publish:
-            contract-name: rlp-decode
-            emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
-            path: lib/rlp/rlp-decode.clar
-            clarity-version: 2
-        - emulated-contract-publish:
-            contract-name: util
-            emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
-            path: contracts/util.clar
             clarity-version: 2
       epoch: "2.4"

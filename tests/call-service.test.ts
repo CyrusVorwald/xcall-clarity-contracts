@@ -8,6 +8,8 @@ const ICON_DAPP_NETWORK_ADDRESS = "0xa";
 const BASE_ICON_CONNECTION = "0xb";
 const STACKS_NID = "0x1.STACKS";
 const STACKS_DAPP_NETWORK_ADDRESS = "0xc";
+const CALL_MESSAGE_WITH_ROLLBACK_TYPE = 2;
+const PERSISTENT_MESSAGE_TYPE = 3;
 
 describe("call-service", () => {
   const accounts = simnet.getAccounts();
@@ -334,19 +336,88 @@ describe("call-service", () => {
     expect(result).toBeOk(Cl.bool(true));
   });
 
-  // it("fails to execute a cross-chain message with invalid sequence", () => {
-  //   const from = ICON_DAPP_NETWORK_ADDRESS;
-  //   const to = STACKS_DAPP_NETWORK_ADDRESS;
-  //   const sequence = 1;
-  //   const data = Uint8Array.from(encode(["test-message"]));
+  it("fails to execute a cross-chain message with invalid sequence", () => {
+    const from = ICON_DAPP_NETWORK_ADDRESS;
+    const to = STACKS_DAPP_NETWORK_ADDRESS;
+    const sequence = 1;
+    const data = Uint8Array.from(encode(["test-message"]));
 
-  //   const { result } = simnet.callPublicFn(
-  //     xCallClarity.contractName.content,
-  //     "execute-message",
-  //     [Cl.stringAscii(ICON_NID), Cl.uint(sequence), Cl.buffer(data)],
-  //     user
-  //   );
+    const { result } = simnet.callPublicFn(
+      xCallClarity.contractName.content,
+      "execute-message",
+      [Cl.stringAscii(ICON_NID), Cl.uint(sequence), Cl.buffer(data)],
+      user
+    );
 
-  //   expect(result).toBeErr(Cl.uint(107));
-  // });
+    expect(result).toBeErr(Cl.uint(107));
+  });
+
+  it("fails to handle an incoming cross-chain message with invalid message hash", () => {
+    const from = ICON_DAPP_NETWORK_ADDRESS;
+    const sequence = 1;
+    const data = Uint8Array.from(encode(["test-message"]));
+    const invalidData = Uint8Array.from(encode(["invalid-message"]));
+  
+    simnet.callPublicFn(
+      xCallClarity.contractName.content,
+      "handle-message",
+      [Cl.stringAscii(from), Cl.uint(sequence), Cl.buffer(data)],
+      user
+    );
+  
+    const { result } = simnet.callPublicFn(
+      xCallClarity.contractName.content,
+      "handle-message",
+      [Cl.stringAscii(from), Cl.uint(sequence + 1), Cl.buffer(invalidData)],
+      user
+    );
+  
+    expect(result).toBeErr(Cl.uint(106));
+  });
+
+  it("fails to handle an incoming cross-chain message with unsupported message type", () => {
+    const from = ICON_DAPP_NETWORK_ADDRESS;
+    const sequence = 1;
+    const unsupportedMessageType = 4;
+    const data = Uint8Array.from(encode([unsupportedMessageType, "test-message"]));
+  
+    const { result } = simnet.callPublicFn(
+      xCallClarity.contractName.content,
+      "handle-message",
+      [Cl.stringAscii(from), Cl.uint(sequence), Cl.buffer(data)],
+      user
+    );
+  
+    expect(result).toBeErr(Cl.uint(108));
+  });
+
+  it("handles an incoming call message with rollback", () => {
+    const from = ICON_DAPP_NETWORK_ADDRESS;
+    const sequence = 1;
+    const data = Uint8Array.from(encode([CALL_MESSAGE_WITH_ROLLBACK_TYPE, "test-message", "rollback-data"]));
+  
+    const { result } = simnet.callPublicFn(
+      xCallClarity.contractName.content,
+      "handle-message",
+      [Cl.stringAscii(from), Cl.uint(sequence), Cl.buffer(data)],
+      user
+    );
+  
+    expect(result).toBeOk(Cl.bool(true));
+  });
+
+  it("handles an incoming persistent message", () => {
+    const from = ICON_DAPP_NETWORK_ADDRESS;
+    const sequence = 1;
+    const data = Uint8Array.from(encode([PERSISTENT_MESSAGE_TYPE, "test-message"]));
+  
+    const { result } = simnet.callPublicFn(
+      xCallClarity.contractName.content,
+      "handle-message",
+      [Cl.stringAscii(from), Cl.uint(sequence), Cl.buffer(data)],
+      user
+    );
+  
+    expect(result).toBeOk(Cl.bool(true));
+  });
 });

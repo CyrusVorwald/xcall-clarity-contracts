@@ -35,6 +35,21 @@ path = 'lib/rlp/rlp-decode.clar'
 clarity_version = 2
 epoch = 2.4
 
+[contracts.sip-010-trait]
+path = 'lib/sips/sip-010-trait.clar'
+clarity_version = 2
+epoch = 2.4
+
+[contracts.sbtc]
+path = 'contracts/mocks/sbtc.clar'
+clarity_version = 2
+epoch = 2.4
+
+[contracts.sample-dapp]
+path = 'contracts/mocks/sample-dapp.clar'
+clarity_version = 2
+epoch = 2.4
+
 [contracts.util]
 path = 'contracts/util.clar'
 clarity_version = 2

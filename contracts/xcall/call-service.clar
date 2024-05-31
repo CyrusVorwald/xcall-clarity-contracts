@@ -4,6 +4,9 @@
 ;; description:
 
 ;; traits
+(impl-trait .call-service-trait.call-service-trait)
+(use-trait call-service-receiver-trait .call-service-receiver-trait.call-service-receiver-trait)
+(use-trait connection-trait .connection-trait.connection-trait)
 ;;
 
 ;; token definitions
@@ -41,9 +44,30 @@
 (define-map message-hashes { chain-identifier: (string-ascii 50), sequence: uint } { hash: (buff 32) })
 (define-map rollbacks { chain-identifier: (string-ascii 50), sequence: uint } { data: (buff 1024), rollback: (buff 1024) })
 (define-map default-connections { chain-identifier: (string-ascii 50) } { connection: principal })
+(define-map proxyReqs uint { from: (string-ascii 150), to: (string-ascii 150), sn: uint, type: uint, data: (buff 32), protocols: (list 10 (string-ascii 50)) })
 ;;
 
 ;; public functions
+(define-read-only (get-chain-identifier (network-address (string-ascii 150)))
+  ;; TODO: Extract the chain ID from the network address
+  (ok "chain-identifier")
+)
+
+(define-private (get-current-sequence (chain-identifier (string-ascii 50)) (contract-address principal))
+  (match (map-get? message-sequences { chain-identifier: chain-identifier, contract-address: contract-address })
+    entry (ok (get current-sequence entry))
+    (ok u0)
+  )
+)
+
+(define-private (increment-sequence (chain-identifier (string-ascii 50)) (contract-address principal))
+  (let ((current-sequence (unwrap-panic (get-current-sequence chain-identifier contract-address))))
+    (asserts! (< current-sequence MAX_SEQUENCE) ERR_INVALID_SEQUENCE)
+    (map-set message-sequences { chain-identifier: chain-identifier, contract-address: contract-address } { current-sequence: (+ current-sequence u1) })
+    (ok true)
+  )
+)
+
 (define-public (send-message (to (string-ascii 150)) (data (buff 1024)) (rollback (optional (buff 1024))) (fee uint))
   (let ((chain-identifier (unwrap-panic (get-chain-identifier to))))
     (asserts! (>= fee (var-get protocol-fee)) ERR_INSUFFICIENT_FEE)
@@ -94,6 +118,166 @@
       )
     )
   )
+)
+
+;; Execute a cross-chain message
+(define-public (execute-call (id uint) (data (buff 1024)))
+  (ok true)
+)
+
+(define-public (execute-rollback (id uint))
+  (ok true)
+)
+
+;; (define-public (execute-call (id uint) (data (buff 1024)))
+;;   (match (map-get? proxyReqs id)
+;;     req (begin
+;;       (map-delete proxyReqs id)
+;;       (asserts! (is-eq (hash (unwrap-panic req)) (hash data)) ERR_INVALID_MESSAGE_HASH)
+;;       (execute-message id req)
+;;     )
+;;     (err ERR_MESSAGE_NOT_FOUND)
+;;   )
+;; )
+
+;; (define-private (execute-message (id uint) (req { from: (string-ascii 150), to: (string-ascii 150), sn: uint, type: uint, data: (buff 1024), protocols: (list 10 (string-ascii 50)) }))
+;;   (let ((msg-type (get type req)))
+;;     (if (is-eq msg-type CALL_MESSAGE_TYPE)
+;;       (try-execute id (get from req) (get data req) (get protocols req))
+;;       (if (is-eq msg-type CALL_MESSAGE_WITH_ROLLBACK_TYPE)
+;;         (begin
+;;           (try-execute id (get from req) (get data req) (get protocols req))
+;;           (let ((rollback-data (unwrap-panic (map-get? rollbacks (get sn req)))))
+;;             (map-set rollbacks (get sn req) (merge rollback-data { enabled: true }))
+;;           )
+;;         )
+;;         (if (is-eq msg-type PERSISTENT_MESSAGE_TYPE)
+;;           (try-execute id (get from req) (get data req) (get protocols req))
+;;           (begin
+;;             (print { event: "unsupported-message-type", message-type: msg-type })
+;;             (err ERR_UNKNOWN_MESSAGE_TYPE)
+;;           )
+;;         )
+;;       )
+;;     )
+;;   )
+;; )
+
+;; (define-private (try-execute (id uint) (from (string-ascii 150)) (data (buff 1024)) (protocols (list 10 (string-ascii 50))) (target-contract <call-service-receiver-trait>))
+;;   (let ((result (contract-call? target-contract handle-call-message from data protocols)))
+;;     (match result
+;;       success (begin
+;;         (print { event: "call-executed", id: id, code: u1, msg: "success" })
+;;         (ok true)
+;;       )
+;;       error (begin
+;;         (print { event: "call-executed", id: id, code: u0, msg: "error" })
+;;         (ok false)
+;;       )
+;;     )
+;;   )
+;; )
+
+(define-public (set-admin (new-admin principal))
+  (begin
+    (asserts! (is-eq tx-sender (var-get admin)) ERR_UNAUTHORIZED)
+    (var-set admin new-admin)
+    (ok true)
+  )
+)
+
+(define-public (set-protocol-fee (new-fee uint))
+  (begin
+    (asserts! (is-eq tx-sender (var-get admin)) ERR_UNAUTHORIZED)
+    (var-set protocol-fee new-fee)
+    (ok true)
+  )
+)
+
+(define-public (set-fee-handler (new-handler principal))
+  (begin
+    (asserts! (is-eq tx-sender (var-get admin)) ERR_UNAUTHORIZED)
+    (var-set fee-handler new-handler)
+    (ok true)
+  )
+)
+
+(define-public (set-default-connection (chain-identifier (string-ascii 50)) (connection principal))
+  (begin
+    (asserts! (is-eq tx-sender (var-get admin)) ERR_UNAUTHORIZED)
+    (map-set default-connections { chain-identifier: chain-identifier } { connection: connection })
+    (ok true)
+  )
+)
+;;
+
+;; read only functions
+(define-read-only (get-admin)
+  (ok (var-get admin))
+)
+
+(define-read-only (get-protocol-fee)
+  (ok (var-get protocol-fee))
+)
+
+(define-read-only (get-fee-handler)
+  (ok (var-get fee-handler))
+)
+
+(define-public (get-fee (chain-identifier (string-ascii 50)) (rollback bool) (sources (optional (list 50 (string-ascii 50)))))
+  (let ((protocol-fee-local (var-get protocol-fee)))
+      (match (map-get? default-connections { chain-identifier: chain-identifier })
+        entry (let ((connection (get connection entry)))
+                (unwrap-panic
+                  (get-connection-fee connection chain-identifier rollback)))
+        (err ERR_NO_DEFAULT_CONNECTION))))
+
+(define-private (get-connection-fee (connection <connection-trait>) (chain-identifier (string-ascii 50)) (rollback bool))
+  (contract-call? connection get-fee chain-identifier rollback))
+
+;; (define-private (get-total-fee (connection (string-ascii 50)) (total uint))
+;;   (let ((fee (unwrap-panic (contract-call? (as-contract tx-sender) get-fee connection))))
+;;     (+ total fee)))
+
+(define-read-only (get-default-connection (chain-identifier (string-ascii 50)))
+  (match (map-get? default-connections { chain-identifier: chain-identifier })
+    entry (ok (get connection entry))
+    (err ERR_NO_DEFAULT_CONNECTION)
+  )
+)
+
+(define-read-only (get-message-hash (chain-identifier (string-ascii 50)) (sequence uint))
+  (match (map-get? message-hashes { chain-identifier: chain-identifier, sequence: sequence })
+    entry (ok (get hash entry))
+    (err ERR_MESSAGE_NOT_FOUND)
+  )
+)
+
+;; (define-read-only (get-chain-identifier (network-address (string-ascii 150)))
+;;   ;; TODO: Extract the chain ID from the network address
+;;   (ok "chain-identifier")
+;; )
+;;
+
+;; private functions
+;; (define-private (get-current-sequence (chain-identifier (string-ascii 50)) (contract-address principal))
+;;   (match (map-get? message-sequences { chain-identifier: chain-identifier, contract-address: contract-address })
+;;     entry (ok (get current-sequence entry))
+;;     (ok u0)
+;;   )
+;; )
+
+;; (define-private (increment-sequence (chain-identifier (string-ascii 50)) (contract-address principal))
+;;   (let ((current-sequence (unwrap-panic (get-current-sequence chain-identifier contract-address))))
+;;     (asserts! (< current-sequence MAX_SEQUENCE) ERR_INVALID_SEQUENCE)
+;;     (map-set message-sequences { chain-identifier: chain-identifier, contract-address: contract-address } { current-sequence: (+ current-sequence u1) })
+;;     (ok true)
+;;   )
+;; )
+
+(define-private (hash (data (buff 1024)))
+  ;; used for tests. simnet can only call contracts, not builtin hash160
+  (ok (hash160 data))
 )
 
 (define-private (handle-call-message (from (string-ascii 150)) (data (buff 1024)))
@@ -175,100 +359,6 @@
       )
     )
   )
-)
-
-;; Execute a cross-chain message
-(define-public (execute-message (chain-identifier (string-ascii 50)) (sequence uint) (data (buff 1024)))
-  ;; TODO: Implement logic to execute the message on the target contract
-  ;; TODO: Update message status and emit relevant events
-  (ok true)
-)
-
-(define-public (set-admin (new-admin principal))
-  (begin
-    (asserts! (is-eq tx-sender (var-get admin)) ERR_UNAUTHORIZED)
-    (var-set admin new-admin)
-    (ok true)
-  )
-)
-
-(define-public (set-protocol-fee (new-fee uint))
-  (begin
-    (asserts! (is-eq tx-sender (var-get admin)) ERR_UNAUTHORIZED)
-    (var-set protocol-fee new-fee)
-    (ok true)
-  )
-)
-
-(define-public (set-fee-handler (new-handler principal))
-  (begin
-    (asserts! (is-eq tx-sender (var-get admin)) ERR_UNAUTHORIZED)
-    (var-set fee-handler new-handler)
-    (ok true)
-  )
-)
-
-(define-public (set-default-connection (chain-identifier (string-ascii 50)) (connection principal))
-  (begin
-    (asserts! (is-eq tx-sender (var-get admin)) ERR_UNAUTHORIZED)
-    (map-set default-connections { chain-identifier: chain-identifier } { connection: connection })
-    (ok true)
-  )
-)
-;;
-
-;; read only functions
-(define-read-only (get-admin)
-  (ok (var-get admin))
-)
-
-(define-read-only (get-protocol-fee)
-  (ok (var-get protocol-fee))
-)
-
-(define-read-only (get-fee-handler)
-  (ok (var-get fee-handler))
-)
-
-(define-read-only (get-default-connection (chain-identifier (string-ascii 50)))
-  (match (map-get? default-connections { chain-identifier: chain-identifier })
-    entry (ok (get connection entry))
-    (err ERR_NO_DEFAULT_CONNECTION)
-  )
-)
-
-(define-read-only (get-message-hash (chain-identifier (string-ascii 50)) (sequence uint))
-  (match (map-get? message-hashes { chain-identifier: chain-identifier, sequence: sequence })
-    entry (ok (get hash entry))
-    (err ERR_MESSAGE_NOT_FOUND)
-  )
-)
-
-(define-read-only (get-chain-identifier (network-address (string-ascii 150)))
-  ;; TODO: Extract the chain ID from the network address
-  (ok "chain-identifier")
-)
-;;
-
-;; private functions
-(define-private (get-current-sequence (chain-identifier (string-ascii 50)) (contract-address principal))
-  (match (map-get? message-sequences { chain-identifier: chain-identifier, contract-address: contract-address })
-    entry (ok (get current-sequence entry))
-    (ok u0)
-  )
-)
-
-(define-private (increment-sequence (chain-identifier (string-ascii 50)) (contract-address principal))
-  (let ((current-sequence (unwrap-panic (get-current-sequence chain-identifier contract-address))))
-    (asserts! (< current-sequence MAX_SEQUENCE) ERR_INVALID_SEQUENCE)
-    (map-set message-sequences { chain-identifier: chain-identifier, contract-address: contract-address } { current-sequence: (+ current-sequence u1) })
-    (ok true)
-  )
-)
-
-(define-private (hash (data (buff 1024)))
-  ;; used for tests. simnet can only call contracts, not builtin hash160
-  (ok (hash160 data))
 )
 ;;
 
